@@ -1,5 +1,9 @@
+# converted difference in days into a numeric value
+
 completely_fixed_data$date_diff <- as.numeric(completely_fixed_data$date_diff, units = "days")
 colnames(completely_fixed_data)
+
+# T-test for differences in mean time and gender
 completely_fixed_data %>% select(c(date_diff, GENDER)) %>%
   tbl_summary(by = GENDER,
               type = list(date_diff ~ "continuous"),
@@ -7,6 +11,7 @@ completely_fixed_data %>% select(c(date_diff, GENDER)) %>%
   add_overall() %>%
   add_p(test = list(date_diff ~ "t.test"))
 
+# ANOVA for differences in mean time between ethnicities 
 completely_fixed_data %>% select(c(date_diff, ETHNICITY)) %>%
   tbl_summary(by = ETHNICITY,
               type = list(date_diff ~ "continuous"),
@@ -14,6 +19,7 @@ completely_fixed_data %>% select(c(date_diff, ETHNICITY)) %>%
   add_overall() %>%
   add_p(test = list(date_diff ~ "aov"))
 
+# ANOVA for differences in mean time between quintiles 
 completely_fixed_data %>% select(c(date_diff, QUINTILE_2019)) %>%
   tbl_summary(by = QUINTILE_2019,
               type = list(date_diff ~ "continuous"),
@@ -21,6 +27,7 @@ completely_fixed_data %>% select(c(date_diff, QUINTILE_2019)) %>%
   add_overall() %>%
   add_p(test = list(date_diff ~ "aov"))
 
+# ANOVA for differences in mean time between performance statuses
 completely_fixed_data %>% select(c(date_diff, PERFORMANCESTATUS)) %>%
   tbl_summary(by = PERFORMANCESTATUS,
               type = list(date_diff ~ "continuous"),
