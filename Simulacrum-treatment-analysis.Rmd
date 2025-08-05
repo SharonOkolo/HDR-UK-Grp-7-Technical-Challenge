@@ -1,0 +1,650 @@
+---
+title: "simulacrum-treatment-analysis"
+author: "A.Stow-Florence"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  results = "asis")
+
+#Load packages for project
+library(tidyverse)
+library(knitr)
+library(janitor)
+library(lubridate)
+library(ggthemes)
+library(ggsci)
+
+
+# Load Okabe & Ito colourblind-friendly palette
+okabe_ito_palette <- function(n) {
+  c(
+    "#E69F00", "#56B4E9", "#009E73", "#F0E442",
+    "#0072B2", "#D55E00", "#CC79A7", "#999999"
+  )[1:n]
+}
+
+```
+
+## Diagnosis-to-Treatment Intervals in Cancer Patients: An Intersectional Analysis Using Simulacrum v2.1.0
+
+```{r data loading and cleaning}
+#Load data from /Users/andrella/Desktop/Data_scientist_portfolio/Cancer-Research-HDRUK-Technical-Challenge/simulacrum_v2.1.0/Data
+
+# Load Patient demographics, SACT and tumour data (SACT = Systemic Anti-Cancer Therapy)
+
+patient_demographics <- read_csv("~/Desktop/Data_scientist_portfolio/Cancer-Research-HDRUK-Technical-Challenge/simulacrum_v2.1.0/Data/sim_av_patient.csv") %>% clean_names()
+tumour_diagnoses<- read_csv("~/Desktop/Data_scientist_portfolio/Cancer-Research-HDRUK-Technical-Challenge/simulacrum_v2.1.0/Data/sim_av_tumour.csv") %>% clean_names()
+sact_regimens <- read.csv("~/Desktop/Data_scientist_portfolio/Cancer-Research-HDRUK-Technical-Challenge/simulacrum_v2.1.0/Data/sim_sact_regimen.csv") %>% clean_names()
+gender_lookup <- readxl::read_excel("~/Desktop/Data_scientist_portfolio/Cancer-Research-HDRUK-Technical-Challenge/simulacrum_v2.1.0/Documents/all_z_lookup_tables.xlsx" , sheet = "z_gender" )
+ethnicity_lookup <- readxl::read_excel("~/Desktop/Data_scientist_portfolio/Cancer-Research-HDRUK-Technical-Challenge/simulacrum_v2.1.0/Documents/all_z_lookup_tables.xlsx", sheet = "z_ethnicity")
+
+#Clean and prep data set 
+# Rename ENCORE_PATIENT_ID to match others
+sact_regimens <- sact_regimens %>%
+  rename(patientid = encore_patient_id)
+
+# Join datasets on patientid
+df <- patient_demographics %>%
+  left_join(tumour_diagnoses, by = "patientid") %>%
+  left_join(sact_regimens, by = "patientid") %>%
+  mutate(
+    diagnosis_date = ymd(diagnosisdatebest),
+    treatment_date = ymd(start_date_of_regimen),
+    time_to_treatment = as.numeric(treatment_date - diagnosis_date)
+  ) %>%
+  filter(time_to_treatment >= 0, time_to_treatment <= 365)
+
+# Create age groups
+df <- df %>%
+  mutate(
+    age_group = case_when(
+      age >= 18 & age <= 24 ~ "18–24",
+      age >= 25 & age <= 34 ~ "25–34",
+      age >= 35 & age <= 54 ~ "35–54",
+      age >= 55             ~ "55+",
+      TRUE ~ NA_character_
+    ),
+    fine_age_group = case_when(
+      age >= 55 & age <= 59 ~ "55–59",
+      age >= 60 & age <= 69 ~ "60–69",
+      age >= 70 & age <= 79 ~ "70–79",
+      age >= 80             ~ "80+",
+      TRUE ~ NA_character_
+    )
+  )
+
+```
+
+```{r data analysis-Question 1}
+#Question 1:What is the average time between diagnosis and treatment across age groups?
+# Summary statistics by age group
+
+treatment_time_plot <- df %>%
+  filter(!is.na(age_group), !is.na(time_to_treatment)) %>%
+  ggplot(aes(x = age_group, y = time_to_treatment)) +
+  stat_summary(fun = mean, geom = "bar", width = 0.5, fill = okabe_ito_palette(3)[2],  alpha = 0.8) +
+  geom_text(stat = "summary", fun = mean, 
+            aes(label = paste0(round(..y.., 0), " days")), 
+            vjust = -0.5, size = 3.5, fontface = "bold") +
+  labs(
+    title = "Average Time from Diagnosis to Treatment by Age Group",
+    x = "Age Group",
+    y = "Time to Treatment (Days)",
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.margin = margin(t = 15, r = 20, b = 40, l = 20),
+    axis.title = element_text(size = 12,face = "bold"),
+    axis.text = element_text(size = 11),
+    plot.caption = element_text(size = 9, color = "gray50")
+  ) +
+  scale_y_continuous(limits = c(0, 100), expand = c(0, 0))
+
+print(treatment_time_plot)
+
+# Break down 35-54 into smaller groups
+middle_age_detailed <- df %>%
+  filter(age >= 35 & age <= 54, !is.na(time_to_treatment)) %>%
+  mutate(
+    detailed_age = case_when(
+      age >= 35 & age <= 39 ~ "35-39",
+      age >= 40 & age <= 44 ~ "40-44", 
+      age >= 45 & age <= 49 ~ "45-49",
+      age >= 50 & age <= 54 ~ "50-54"
+    )
+  ) %>%
+  filter(!is.na(detailed_age)) %>%
+  ggplot(aes(x = detailed_age, y = time_to_treatment)) +
+  stat_summary(fun = mean, geom = "bar", width = 0.6, fill = okabe_ito_palette(3)[1]) +
+  geom_text(stat = "summary", fun = mean, 
+            aes(label = paste0(round(..y.., 0), " days")), 
+            vjust = -0.5, size = 3.5, fontface = "bold") +
+  labs(
+    title = "Time to Treatment Within 35-54 Age Group",
+    subtitle = "Detailed breakdown of the highest-delay group",
+    x = "Detailed Age Groups",
+    y = "Time to Treatment (Days)"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, color = "gray40")
+  ) +
+  scale_y_continuous(expand = c(0, 0))
+
+print(middle_age_detailed)
+
+
+# Use your existing fine_age_group for 55+ breakdown
+elderly_detailed <- df %>%
+  filter(!is.na(fine_age_group), !is.na(time_to_treatment)) %>%
+  ggplot(aes(x = fine_age_group, y = time_to_treatment)) +
+  stat_summary(fun = mean, geom = "bar", width = 0.6, fill = okabe_ito_palette(3)[3]) +
+  geom_text(stat = "summary", fun = mean, 
+            aes(label = paste0(round(..y.., 0), " days")), 
+            vjust = -0.5, size = 3.5, fontface = "bold") +
+  labs(
+    title = "Time to Treatment Within 55+ Age Group",
+    subtitle = "Understanding the pattern in older patients",
+    x = "Detailed Age Groups (55+)",
+    y = "Time to Treatment (Days)"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5, color = "gray40")
+  ) +
+  scale_y_continuous(expand = c(0, 0))
+
+print(elderly_detailed)
+
+
+# Get the numbers for both groups
+middle_age_stats <- df %>%
+  filter(age >= 35 & age <= 54, !is.na(time_to_treatment)) %>%
+  mutate(
+    detailed_age = case_when(
+      age >= 35 & age <= 39 ~ "35-39",
+      age >= 40 & age <= 44 ~ "40-44", 
+      age >= 45 & age <= 49 ~ "45-49",
+      age >= 50 & age <= 54 ~ "50-54"
+    )
+  ) %>%
+  filter(!is.na(detailed_age)) %>%
+  group_by(detailed_age) %>%
+  summarise(
+    n = n(),
+    mean_days = round(mean(time_to_treatment), 1),
+    median_days = round(median(time_to_treatment), 1),
+    .groups = 'drop'
+  )
+
+elderly_stats <- df %>%
+  filter(!is.na(fine_age_group), !is.na(time_to_treatment)) %>%
+  group_by(fine_age_group) %>%
+  summarise(
+    n = n(),
+    mean_days = round(mean(time_to_treatment), 1),
+    median_days = round(median(time_to_treatment), 1),
+    .groups = 'drop'
+  )
+
+
+
+# Combined detailed analysis - all age groups in one chart
+combined_detailed_plot <- df %>%
+  # Create comprehensive age groups
+  mutate(
+    detailed_age_all = case_when(
+      age >= 18 & age <= 24 ~ "18-24",
+      age >= 25 & age <= 34 ~ "25-34", 
+      age >= 35 & age <= 39 ~ "35-39",
+      age >= 40 & age <= 44 ~ "40-44",
+      age >= 45 & age <= 49 ~ "45-49",
+      age >= 50 & age <= 54 ~ "50-54",
+      age >= 55 & age <= 59 ~ "55-59",
+      age >= 60 & age <= 69 ~ "60-69",
+      age >= 70 & age <= 79 ~ "70-79",
+      age >= 80             ~ "80+",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(detailed_age_all), !is.na(time_to_treatment)) %>%
+  # Ensure proper ordering
+  mutate(detailed_age_all = factor(detailed_age_all, 
+                                   levels = c("18-24", "25-34", "35-39", "40-44", 
+                                            "45-49", "50-54", "55-59", "60-69", 
+                                            "70-79", "80+"))) %>%
+  ggplot(aes(x = detailed_age_all, y = time_to_treatment)) +
+  stat_summary(fun = mean, geom = "bar", width = 0.7, 
+               fill = okabe_ito_palette(3)[2], alpha = 0.8) +
+  geom_text(stat = "summary", fun = mean, 
+            aes(label = paste0(round(..y.., 0), " days")), 
+            vjust = -0.5, size = 3, fontface = "bold") +
+  # Highlight the problem areas
+  annotate("rect", xmin = 2.5, xmax = 6.5, ymin = 0, ymax = Inf, 
+           alpha = 0.1, fill = "red") +
+  annotate("text", x = 4.5, y = 120, 
+           label = "Peak Delays\n(35-54 years)", 
+           color = "darkred", size = 3.5, fontface = "bold") +
+  labs(
+    title = "Treatment Delays Peak in Middle Age (40s)",
+    subtitle = "Comprehensive view: 40-44 age group faces longest delays at 110+ days",
+    x = "Age Group",
+    y = "Time to Treatment (Days)",
+    caption = "Red shading highlights the age range with peak delay (35-54 years)"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, size = 11, color = "gray40"),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.title = element_text(size = 12),
+    plot.caption = element_text(size = 9, color = "gray50")
+  ) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 130),
+                     breaks = seq(0, 120, 20))
+
+print(combined_detailed_plot)
+
+```
+
+```{r data clean up -Question 2}
+#Question 3 : Are there intersectional patterns between age, sex/gender, and ethnicity in time to diagnosis or treatment?
+
+
+df <- tumour_diagnoses %>%
+  left_join(sact_regimens, by = c("patientid")) %>%
+  left_join(patient_demographics, by = "patientid")
+
+df <- df %>%
+  mutate(age_group = case_when(
+    age < 25 ~ "<25",
+    age >= 25 & age < 35 ~ "25–34",
+    age >= 35 & age < 45 ~ "35–44",
+    age >= 45 & age < 55 ~ "45–54",
+    age >= 55 & age < 65 ~ "55–64",
+    age >= 65 & age < 75 ~ "65–74",
+    age >= 75 ~ "75+",
+    TRUE ~ NA_character_
+  ))   
+
+df <- df %>%
+  mutate(gender = coalesce(gender.x, gender.y))
+
+df <- df %>%
+  mutate(
+    date_decision_to_treat = ymd(date_decision_to_treat),
+    start_date_of_regimen = ymd(start_date_of_regimen),
+    time_to_treatment = as.numeric(start_date_of_regimen - date_decision_to_treat)
+  )
+
+df_intersectional <- df %>%
+  filter(
+    !is.na(age_group),
+    !is.na(gender),
+    !is.na(ethnicity),
+    !is.na(time_to_treatment)
+  )
+
+summary_table <- df_intersectional %>%
+  group_by(age_group, gender, ethnicity) %>%
+  summarise(
+    mean_delay = round(mean(time_to_treatment), 1),
+    median_delay = round(median(time_to_treatment), 1),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(mean_delay))
+
+# View table in console or render in RMarkdown
+kable(summary_table, caption = "Mean and Median Time to Treatment by Age Group, Gender, and Ethnicity")
+
+
+#merge geneder and ethnicity with look-up reference
+df <- df %>%
+  select(-gender.x, -gender.y) %>%                    # remove the duplicates
+  left_join(gender_lookup %>%
+              rename(gender_code = Code,
+                     gender_desc = Description),       # rename lookup columns
+            by = c("gender" = "gender_code"))          # perform the join
+
+# Check if it worked
+# print("After gender join:")
+# print(table(df$gender_desc, useNA = "always"))
+
+# Do the same for ethnicity
+df <- df %>%
+  left_join(ethnicity_lookup %>%
+              rename(ethnicity_code = Code,
+                     ethnicity_desc = Description),
+            by = c("ethnicity" = "ethnicity_code"))
+
+# print("After ethnicity join:")
+# print(table(df$ethnicity_desc, useNA = "always"))
+
+# Now create your intersectional analysis
+df_intersectional <- df %>%
+  filter(
+    !is.na(age_group),
+    !is.na(gender_desc),
+    !is.na(ethnicity_desc),
+    !is.na(time_to_treatment),
+    time_to_treatment >= 0,
+    time_to_treatment <= 365
+  )
+
+# Create summary table
+summary_table <- df_intersectional %>%
+  group_by(age_group, gender_desc, ethnicity_desc) %>%
+  summarise(
+    mean_delay = round(mean(time_to_treatment), 1),
+    median_delay = round(median(time_to_treatment), 1),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  filter(count >= 5) %>%  # Only show groups with reasonable sample sizes
+  arrange(desc(mean_delay))
+
+# Display results
+kable(summary_table, 
+      caption = "Time to Treatment by Age Group, Gender, and Ethnicity")
+
+
+
+```
+
+```{r data analysis q2}
+# Intersectional Analysis: Age, Gender, and Ethnicity in Time to Diagnosis AND Treatment
+
+# First, ensure we're using the correct age groups from your original analysis
+df_analysis <- df %>%
+  mutate(
+    diagnosis_date = ymd(diagnosisdatebest),
+    treatment_date = ymd(start_date_of_regimen),
+    time_to_treatment = as.numeric(treatment_date - diagnosis_date),
+    age_at_diagnosis = age
+  ) %>%
+  filter(
+    !is.na(age_group),  # This uses your original age_group: 18–24, 25–34, 35–54, 55+
+    !is.na(gender_desc),
+    !is.na(ethnicity_desc),
+    !is.na(time_to_treatment),
+    time_to_treatment >= 0,
+    time_to_treatment <= 365
+  )
+
+# 1. COMPREHENSIVE INTERSECTIONAL ANALYSIS with correct age groups
+intersectional_comprehensive <- df_analysis %>%
+  group_by(age_group, gender_desc, ethnicity_desc) %>%
+  summarise(
+    # Treatment delay metrics
+    mean_treatment_delay = round(mean(time_to_treatment, na.rm = TRUE), 1),
+    median_treatment_delay = round(median(time_to_treatment, na.rm = TRUE), 1),
+    
+    # Age at diagnosis (potential diagnostic delay indicator)
+    mean_age_at_diagnosis = round(mean(age_at_diagnosis, na.rm = TRUE), 1),
+    
+    # Sample characteristics
+    count = n(),
+    
+    # Variability
+    sd_treatment_delay = round(sd(time_to_treatment, na.rm = TRUE), 1),
+    
+    .groups = "drop"
+  ) %>%
+  filter(count >= 20) %>%  # Focus on meaningful sample sizes
+  arrange(desc(mean_treatment_delay))
+
+print("INTERSECTIONAL PATTERNS IN TREATMENT TIMING (Using 18–24, 25–34, 35–54, 55+ age groups):")
+kable(head(intersectional_comprehensive, 20))
+
+# 2. GENDER PATTERNS ACROSS YOUR SPECIFIED AGE GROUPS
+gender_patterns <- df_analysis %>%
+  group_by(age_group, gender_desc) %>%
+  summarise(
+    mean_treatment_delay = round(mean(time_to_treatment), 1),
+    median_treatment_delay = round(median(time_to_treatment), 1),
+    mean_age_at_diagnosis = round(mean(age_at_diagnosis), 1),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(factor(age_group, levels = c("18–24", "25–34", "35–54", "55+")), desc(mean_treatment_delay))
+
+print("GENDER DIFFERENCES IN TREATMENT TIMING BY AGE (18–24, 25–34, 35–54, 55+):")
+kable(gender_patterns)
+
+# 3. FOCUS ON 55+ GROUP - Looking for trends 
+elderly_detailed_trends <- df_analysis %>%
+  filter(age_group == "55+") %>%
+  mutate(
+    detailed_elderly_age = case_when(
+      age >= 55 & age <= 59 ~ "55-59",
+      age >= 60 & age <= 69 ~ "60-69", 
+      age >= 70 & age <= 79 ~ "70-79", 
+      age >= 80 ~ "80+",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(detailed_elderly_age)) %>%
+  group_by(detailed_elderly_age, gender_desc, ethnicity_desc) %>%
+  summarise(
+    mean_delay = round(mean(time_to_treatment), 1),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  filter(count >= 15) %>%
+  arrange(detailed_elderly_age, desc(mean_delay))
+
+print("DETAILED 55+ AGE GROUP ANALYSIS - Looking for spike at 60-70, decline at 70-80:")
+kable(elderly_detailed_trends)
+
+# 4. ETHNICITY PATTERNS ACROSS YOUR SPECIFIED AGE GROUPS
+major_ethnicities <- c("White British", "White Irish", "Any other White background", 
+                      "Asian Indian", "Asian Pakistani", "Black African", 
+                      "Black Caribbean", "Chinese", "Any other Asian background")
+
+ethnicity_age_patterns <- df_analysis %>%
+  filter(ethnicity_desc %in% major_ethnicities) %>%
+  group_by(age_group, ethnicity_desc) %>%
+  summarise(
+    mean_treatment_delay = round(mean(time_to_treatment), 1),
+    median_treatment_delay = round(median(time_to_treatment), 1),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  filter(count >= 30) %>%
+  arrange(factor(age_group, levels = c("18–24", "25–34", "35–54", "55+")), desc(mean_treatment_delay))
+
+print("ETHNICITY PATTERNS IN TREATMENT TIMING BY YOUR AGE STRATIFICATION:")
+kable(ethnicity_age_patterns)
+
+# 5. VISUALIZATION: Intersectional patterns
+intersectional_plot <- df_analysis %>%
+  filter(
+    ethnicity_desc %in% major_ethnicities,
+    gender_desc %in% c("Male", "Female")
+  ) %>%
+  group_by(age_group, gender_desc, ethnicity_desc) %>%
+  summarise(
+    mean_delay = mean(time_to_treatment),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  filter(count >= 25) %>%
+  ggplot(aes(x = age_group, y = mean_delay, fill = gender_desc)) +
+  geom_col(position = "dodge", alpha = 0.8, width = 0.7) +
+  facet_wrap(~ ethnicity_desc, scales = "free_y", ncol = 3) +
+  scale_fill_manual(values = okabe_ito_palette(3)[1:2]) +
+  labs(
+    title = "Treatment Delays: Intersectional Analysis",
+    subtitle = "How age, gender, and ethnicity combine to affect treatment timing",
+    x = "Age Group",
+    y = "Average Days from Diagnosis to Treatment",
+    fill = "Gender",
+    caption = "Only intersections with n≥25 shown for reliability"
+  ) +
+  theme_classic() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.subtitle = element_text(hjust = 0.5, color = "gray40", size = 11),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+    strip.text = element_text(size = 9, face = "bold"),
+    legend.position = "bottom"
+  )
+
+print(intersectional_plot)
+
+# 6. EXPANDED GENDER ANALYSIS WITHIN INTERSECTIONS
+# Focus on male vs female differences across intersections
+
+# Overall male vs female in the intersectional data
+gender_overall <- df_analysis %>%
+  filter(gender_desc %in% c("Male", "Female")) %>%
+  group_by(gender_desc) %>%
+  summarise(
+    mean_treatment_delay = round(mean(time_to_treatment), 1),
+    median_treatment_delay = round(median(time_to_treatment), 1),
+    count = n(),
+    .groups = "drop"
+  )
+
+print("OVERALL MALE VS FEMALE IN INTERSECTIONAL ANALYSIS:")
+kable(gender_overall)
+
+# Gender differences within each age-ethnicity combination
+gender_intersectional_detailed <- df_analysis %>%
+  filter(
+    gender_desc %in% c("Male", "Female"),
+    ethnicity_desc %in% major_ethnicities
+  ) %>%
+  group_by(age_group, ethnicity_desc, gender_desc) %>%
+  summarise(
+    mean_delay = round(mean(time_to_treatment), 1),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  filter(count >= 15) %>%
+  pivot_wider(names_from = gender_desc, values_from = c(mean_delay, count)) %>%
+  mutate(
+    gender_gap = mean_delay_Male - mean_delay_Female,
+    total_n = count_Male + count_Female
+  ) %>%
+  arrange(desc(abs(gender_gap)))
+
+print("GENDER DIFFERENCES WITHIN AGE-ETHNICITY INTERSECTIONS:")
+print("(Positive values = Males have longer delays, Negative = Females have longer delays)")
+kable(head(gender_intersectional_detailed, 20))
+
+# Statistical test for gender differences
+t_test_gender <- t.test(time_to_treatment ~ gender_desc, 
+                       data = df_analysis %>% filter(gender_desc %in% c("Male", "Female")))
+
+print("STATISTICAL TEST: Overall Male vs Female difference")
+print(paste("p-value:", round(t_test_gender$p.value, 4)))
+print(paste("Mean difference (Male - Female):", round(diff(t_test_gender$estimate), 1), "days"))
+
+# 7. ETHNICITY AND TREATMENT DELAYS ANALYSIS
+# Direct ethnicity patterns in treatment timing
+ethnicity_treatment_analysis <- df_analysis %>%
+  group_by(ethnicity_desc) %>%
+  summarise(
+    mean_treatment_delay = round(mean(time_to_treatment), 1),
+    median_treatment_delay = round(median(time_to_treatment), 1),
+    count = n(),
+    sd_delay = round(sd(time_to_treatment), 1),
+    .groups = "drop"
+  ) %>%
+  filter(count >= 100) %>%  # Focus on groups with substantial representation
+  arrange(desc(mean_treatment_delay))
+
+print("ETHNICITY AND TREATMENT DELAYS - RANKED BY DELAY LENGTH:")
+kable(ethnicity_treatment_analysis)
+
+# Ethnicity differences within age groups
+ethnicity_age_detailed <- df_analysis %>%
+  filter(ethnicity_desc %in% major_ethnicities) %>%
+  group_by(age_group, ethnicity_desc) %>%
+  summarise(
+    mean_delay = round(mean(time_to_treatment), 1),
+    median_delay = round(median(time_to_treatment), 1),
+    count = n(),
+    .groups = "drop"
+  ) %>%
+  filter(count >= 50) %>%
+  arrange(age_group, desc(mean_delay))
+
+print("ETHNICITY PATTERNS WITHIN EACH AGE GROUP:")
+kable(ethnicity_age_detailed)
+
+# Statistical test comparing major ethnic groups
+major_ethnic_groups <- c("White British", "Asian Indian", "Asian Pakistani", "Black African", "Black Caribbean")
+ethnicity_test_data <- df_analysis %>%
+  filter(ethnicity_desc %in% major_ethnic_groups)
+
+# ANOVA for ethnicity differences
+ethnicity_anova <- aov(time_to_treatment ~ ethnicity_desc, data = ethnicity_test_data)
+ethnicity_anova_summary <- summary(ethnicity_anova)
+
+print("STATISTICAL TEST: Ethnicity differences in treatment delays")
+print(ethnicity_anova_summary)
+
+# Post-hoc comparisons to see which groups differ significantly
+if(ethnicity_anova_summary[[1]][["Pr(>F)"]][1] < 0.05) {
+  tukey_results <- TukeyHSD(ethnicity_anova)
+  print("POST-HOC COMPARISONS (Tukey HSD):")
+  print("Significant differences between ethnic groups:")
+  significant_comparisons <- tukey_results$ethnicity_desc[tukey_results$ethnicity_desc[,"p adj"] < 0.05, , drop = FALSE]
+  print(significant_comparisons)
+}
+
+# Visualization: Ethnicity patterns across age groups
+ethnicity_age_plot <- df_analysis %>%
+  filter(ethnicity_desc %in% major_ethnicities) %>%
+  group_by(age_group, ethnicity_desc) %>%
+  summarise(mean_delay = mean(time_to_treatment), count = n(), .groups = "drop") %>%
+  filter(count >= 30) %>%
+  ggplot(aes(x = age_group, y = mean_delay, color = ethnicity_desc, group = ethnicity_desc)) +
+  geom_line(size = 1.2, alpha = 0.8) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c(okabe_ito_palette(8), "#9467bd")) +  # Add purple from ggsci
+  labs(
+    title = "Treatment Delays by Ethnicity Across Age Groups",
+    subtitle = "How ethnic background influences treatment timing patterns",
+    x = "Age Group",
+    y = "Average Days from Diagnosis to Treatment",
+    color = "Ethnicity"
+  ) +
+  theme_classic() +
+ theme(
+  plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+  plot.subtitle = element_text(hjust = 0.5, color = "gray40", size = 11),
+  axis.text.x = element_text(angle = 45, hjust = 1),
+  legend.position = "bottom",
+  legend.title = element_text(face = "bold"),
+  legend.text = element_text(size = 9),
+  legend.key.size = unit(0.8, "lines")
+) +
+guides(color = guide_legend(nrow = 3, byrow = TRUE))
+
+print(ethnicity_age_plot)
+
+# 8. IDENTIFY PROTECTIVE AND RISK FACTORS
+protective_groups <- intersectional_comprehensive %>%
+  filter(count >= 30) %>%
+  arrange(mean_treatment_delay) %>%
+  head(10) %>%
+  select(age_group, gender_desc, ethnicity_desc, mean_treatment_delay, count)
+
+print("GROUPS WITH FASTEST TREATMENT ACCESS (Protective intersections):")
+kable(protective_groups)
+```
+
+
+
